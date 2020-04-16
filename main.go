@@ -266,6 +266,10 @@ func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
 			http.Redirect(res, r, "/login?go="+url.QueryEscape(redirURL), http.StatusFound)
 			return
 		}
+
+	} else if getfile := r.URL.Query().Get("getfile"); getfile != "" {
+		http.ServeFile(res, r, path.Join(cfg.TemplateDir, getfile))
+		return
 	}
 
 	// Store redirect URL in session (required for oAuth2 flows)
