@@ -207,6 +207,7 @@ func handleAuthRequest(res http.ResponseWriter, r *http.Request) {
 }
 
 func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
+
 	redirURL, err := getRedirectURL(r, mainCfg.Login.DefaultRedirect)
 	if err != nil {
 		http.Error(res, "Invalid redirect URL specified", http.StatusBadRequest)
@@ -229,7 +230,7 @@ func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
 		case plugins.ErrNoValidUserFound:
 			auditFields["reason"] = "invalid credentials"
 			mainCfg.AuditLog.Log(auditEventLoginFailure, r, auditFields) // #nosec G104 - This is only logging
-			http.Redirect(res, r, "/login?go="+url.QueryEscape(redirURL), http.StatusFound)
+			http.Redirect(res, r, "/login?err=1&go="+url.QueryEscape(redirURL), http.StatusFound)
 			return
 		case nil:
 			// Don't handle for now, MFA validation comes first
@@ -238,7 +239,7 @@ func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
 			auditFields["error"] = err.Error()
 			mainCfg.AuditLog.Log(auditEventLoginFailure, r, auditFields) // #nosec G104 - This is only logging
 			log.WithError(err).Error("Login failed with unexpected error")
-			http.Redirect(res, r, "/login?go="+url.QueryEscape(redirURL), http.StatusFound)
+			http.Redirect(res, r, "/login?err=1&go="+url.QueryEscape(redirURL), http.StatusFound)
 			return
 		}
 
@@ -249,9 +250,14 @@ func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
 			auditFields["reason"] = "invalid credentials"
 			mainCfg.AuditLog.Log(auditEventLoginFailure, r, auditFields) // #nosec G104 - This is only logging
 			res.Header().Del("Set-Cookie")                               // Remove login cookie
-			http.Redirect(res, r, "/login?go="+url.QueryEscape(redirURL), http.StatusFound)
+			http.Redirect(res, r, "/login?err=1&go="+url.QueryEscape(redirURL), http.StatusFound)
 			return
-
+		case plugins.ErrOTPVerifyFailed:
+			auditFields["reason"] = "OTP verification failed"
+			mainCfg.AuditLog.Log(auditEventLoginFailure, r, auditFields) // #nosec G104 - This is only logging
+			res.Header().Del("Set-Cookie")                               // Remove login cookie
+			http.Redirect(res, r, "/login?err=1&go="+url.QueryEscape(redirURL), http.StatusFound)
+			return
 		case nil:
 			mainCfg.AuditLog.Log(auditEventLoginSuccess, r, auditFields) // #nosec G104 - This is only logging
 			http.Redirect(res, r, redirURL, http.StatusFound)
@@ -263,7 +269,7 @@ func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
 			mainCfg.AuditLog.Log(auditEventLoginFailure, r, auditFields) // #nosec G104 - This is only logging
 			log.WithError(err).Error("Login failed with unexpected error")
 			res.Header().Del("Set-Cookie") // Remove login cookie
-			http.Redirect(res, r, "/login?go="+url.QueryEscape(redirURL), http.StatusFound)
+			http.Redirect(res, r, "/login?err=1&go="+url.QueryEscape(redirURL), http.StatusFound)
 			return
 		}
 
@@ -282,12 +288,19 @@ func handleLoginRequest(res http.ResponseWriter, r *http.Request) {
 		http.Error(res, "Something went wrong", http.StatusInternalServerError)
 	}
 
+	// Check the error reason if any
+	var reason = ""
+	if r.URL.Query().Get("err") != "" {
+		reason = "Wrong password or user name has been provided"
+	}
+
 	// Render login page
 	tpl := pongo2.Must(pongo2.FromFile(path.Join(cfg.TemplateDir, "index.html")))
 	if err := tpl.ExecuteWriter(pongo2.Context{
 		"active_methods": getFrontendAuthenticators(),
 		"go":             redirURL,
 		"login":          mainCfg.Login,
+		"reason":         reason,
 	}, res); err != nil {
 		log.WithError(err).Error("Unable to render template")
 		http.Error(res, "Something went wrong", http.StatusInternalServerError)

@@ -44,6 +44,8 @@ func getRedirectURL(r *http.Request, fallback string) (string, error) {
 
 	// Remove the "go" parameter as it is a parameter for nginx-sso
 	params.Del("go")
+	// Remove the "err" parameter as it is a parameter for nginx-sso
+	params.Del("err")
 
 	// Parse given URL to extract attached parameters
 	pURL, err := url.Parse(redirURL)
