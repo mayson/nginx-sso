@@ -5,6 +5,7 @@ import "github.com/gorilla/sessions"
 type CookieConfig struct {
 	Domain  string `yaml:"domain"`
 	AuthKey string `yaml:"authentication_key"`
+	EncKey  string `yaml:"encryption_key"`
 	Expire  int    `yaml:"expire"`
 	Prefix  string `yaml:"prefix"`
 	Secure  bool   `yaml:"secure"`

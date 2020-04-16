@@ -11,7 +11,10 @@ login:
 
 cookie:
   domain: ".example.com"
-  authentication_key: "Ff1uWJcLouKu9kwxgbnKcU3ps47gps72sxEz79TGHFCpJNCPtiZAFDisM4MWbstH"
+  # You must regenerate. Use something like: pwgen -syn 64
+  authentication_key: "nynKn{=KQrgp8i;8[C%YG1iN:w[a0_7`fm\<58k1Qk0ts%Ibwb)j?yE+Hbl,K;-C"
+  # You must regenerate. Use something like: pwgen -syn 24
+  encryption_key: "(^%J?Vgo+O5FFTx&VPc?FKl$"
   expire: 3600        # Optional, default: 3600
   prefix: "nginx-sso" # Optional, default: nginx-sso
   secure: true        # Optional, default: false
