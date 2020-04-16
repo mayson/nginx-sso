@@ -40,4 +40,5 @@ require (
 	gopkg.in/square/go-jose.v2 v2.4.0 // indirect
 	gopkg.in/validator.v2 v2.0.0-20191029180049-30e574a82075 // indirect
 	gopkg.in/yaml.v2 v2.2.4
+        github.com/patrickmn/go-cache
 )

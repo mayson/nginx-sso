@@ -13,12 +13,18 @@ import (
 	"github.com/gorilla/sessions"
 
 	"github.com/Luzifer/nginx-sso/plugins"
+
+	"github.com/patrickmn/go-cache"
+	"time"
+	"encoding/gob"
 )
 
 const (
 	authLDAPProtoLDAP  = "ldap"
 	authLDAPProtoLDAPs = "ldaps"
 )
+
+var gocache *cache.Cache
 
 type AuthLDAP struct {
 	EnableBasicAuth       bool   `yaml:"enable_basic_auth"`
@@ -86,6 +92,8 @@ func (a *AuthLDAP) Configure(yamlSource []byte) error {
 
 	a.cookie = envelope.Cookie
 
+	gocache = cache.New(time.Duration(a.cookie.Expire)*time.Second, time.Duration(a.cookie.Expire)*time.Second)
+
 	// Set defaults
 	if a.UserSearchFilter == "" {
 		a.UserSearchFilter = `(uid={0})`
@@ -114,6 +122,9 @@ func (a *AuthLDAP) Configure(yamlSource []byte) error {
 // returned
 func (a AuthLDAP) DetectUser(res http.ResponseWriter, r *http.Request) (string, []string, error) {
 	var alias, user string
+	var saved time.Time
+
+	gob.Register(time.Time{})
 
 	if a.EnableBasicAuth {
 		if basicUser, basicPass, ok := r.BasicAuth(); ok {
@@ -143,10 +154,17 @@ func (a AuthLDAP) DetectUser(res http.ResponseWriter, r *http.Request) (string, 
 			return "", nil, plugins.ErrNoValidUserFound
 		}
 
+		if saved, ok = sess.Values["saved"].(time.Time); !ok {
+			saved = time.Unix(0, 0)
+		}
+
 		// We had a cookie, lets renew it
-		sess.Options = a.cookie.GetSessionOpts()
-		if err := sess.Save(r, res); err != nil {
-			return "", nil, err
+		if time.Now().After(saved.Add(time.Duration(a.cookie.Expire/2)*time.Second)) {
+			sess.Options = a.cookie.GetSessionOpts()
+			sess.Values["saved"] = time.Now()
+			if err := sess.Save(r, res); err != nil {
+				return "", nil, err
+			}
 		}
 	}
 
@@ -165,6 +183,8 @@ func (a AuthLDAP) Login(res http.ResponseWriter, r *http.Request) (string, []plu
 	username := r.FormValue(strings.Join([]string{a.AuthenticatorID(), "username"}, "-"))
 	password := r.FormValue(strings.Join([]string{a.AuthenticatorID(), "password"}, "-"))
 
+	gob.Register(time.Time{})
+
 	var (
 		userDN string
 		alias  string
@@ -179,6 +199,7 @@ func (a AuthLDAP) Login(res http.ResponseWriter, r *http.Request) (string, []plu
 	sess.Options = a.cookie.GetSessionOpts()
 	sess.Values["user"] = userDN
 	sess.Values["alias"] = alias
+	sess.Values["saved"] = time.Now()
 	return userDN, nil, sess.Save(r, res)
 }
 
@@ -318,33 +339,41 @@ func (a AuthLDAP) dial() (*ldap.Conn, error) {
 
 // getUserGroups searches for groups containing the user
 func (a AuthLDAP) getUserGroups(userDN, alias string) ([]string, error) {
-	l, err := a.dial()
-	if err != nil {
-		return nil, err
-	}
-	defer l.Close()
-
-	sreq := ldap.NewSearchRequest(
-		a.GroupSearchBase,
-		ldap.ScopeWholeSubtree,
-		ldap.NeverDerefAliases,
-		0, 0, false,
-		strings.NewReplacer(
-			`{0}`, userDN,
-			`{1}`, alias,
-		).Replace(a.GroupMembershipFilter),
-		[]string{"dn"},
-		nil,
-	)
-
-	sres, err := l.Search(sreq)
-	if err != nil {
-		return nil, fmt.Errorf("Unable to search for groups: %s", err)
-	}
-
 	groups := []string{}
-	for _, r := range sres.Entries {
-		groups = append(groups, r.DN)
+	ff, found := gocache.Get(alias)
+	if found {
+		groups = ff.([]string)
+
+	} else {
+		l, err := a.dial()
+		if err != nil {
+			return nil, err
+		}
+		defer l.Close()
+
+		sreq := ldap.NewSearchRequest(
+			a.GroupSearchBase,
+			ldap.ScopeWholeSubtree,
+			ldap.NeverDerefAliases,
+			0, 0, false,
+			strings.NewReplacer(
+				`{0}`, userDN,
+				`{1}`, alias,
+			).Replace(a.GroupMembershipFilter),
+			[]string{"dn"},
+			nil,
+		)
+
+		sres, err := l.Search(sreq)
+		if err != nil {
+			return nil, fmt.Errorf("Unable to search for groups: %s", err)
+		}
+
+		for _, r := range sres.Entries {
+			groups = append(groups, r.DN)
+		}
+
+		gocache.Set(alias, groups, cache.DefaultExpiration)
 	}
 
 	return groups, nil
